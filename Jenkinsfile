@@ -7,6 +7,7 @@ pipeline {
     }
 
     stages {
+
         stage('Checkout') {
             steps {
                 echo 'Source code checked out by Jenkins SCM'
@@ -16,8 +17,13 @@ pipeline {
         stage('Verify Environment') {
             steps {
                 sh '''
+                    echo "Node.js Version:"
                     node --version
+
+                    echo "NPM Version:"
                     npm --version
+
+                    echo "Docker Version:"
                     docker --version
                 '''
             }
@@ -35,12 +41,10 @@ pipeline {
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('SonarQube') {
-                    script {
-                        def scannerHome = tool 'SonarScanner'
-                        sh """
-                            "\${scannerHome}/bin/sonar-scanner"
-                        """
-                    }                }
+                    sh '''
+                        /var/jenkins_home/tools/hudson.plugins.sonar.SonarRunnerInstallation/SonarScanner/bin/sonar-scanner
+                    '''
+                }
             }
         }
 
@@ -57,8 +61,13 @@ pipeline {
         success {
             echo 'CI pipeline completed successfully!'
         }
+
         failure {
             echo 'Pipeline failed. Check Console Output.'
+        }
+
+        always {
+            echo 'CI pipeline execution completed.'
         }
     }
 }

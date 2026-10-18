@@ -48,6 +48,20 @@ pipeline {
             }
         }
 
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    script {
+                        def qualityGate = waitForQualityGate(
+                            abortPipeline: true
+                        )
+
+                        echo "SonarQube Quality Gate: ${qualityGate.status}"
+                    }
+                }
+            }
+        }
+
         stage('Build Docker Image') {
             steps {
                 sh '''
@@ -59,7 +73,7 @@ pipeline {
 
     post {
         success {
-            echo 'CI pipeline completed successfully!'
+            echo 'CI/CD pipeline completed successfully!'
         }
 
         failure {
@@ -67,7 +81,7 @@ pipeline {
         }
 
         always {
-            echo 'CI pipeline execution completed.'
+            echo 'CI/CD pipeline execution completed.'
         }
     }
 }

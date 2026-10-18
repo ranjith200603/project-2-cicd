@@ -1,0 +1,10 @@
+{
+  "name": "project-2-cicd",
+  "version": "1.0.0",
+  "description": "Enterprise CI/CD demo application",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test"
+  }
+}

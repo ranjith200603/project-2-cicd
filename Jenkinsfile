@@ -3,7 +3,10 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_IMAGE = 'project-2-cicd:1.0.0'
+        DOCKER_IMAGE = 'ranjithkumarrk27/project-2-cicd'
+        APP_CONTAINER = 'project-2-app'
+        APP_PORT = '3001'
+        APP_INTERNAL_PORT = '3000'
     }
 
     stages {
@@ -17,13 +20,8 @@ pipeline {
         stage('Verify Environment') {
             steps {
                 sh '''
-                    echo "Node.js Version:"
                     node --version
-
-                    echo "NPM Version:"
                     npm --version
-
-                    echo "Docker Version:"
                     docker --version
                 '''
             }
@@ -55,8 +53,7 @@ pipeline {
                         def qualityGate = waitForQualityGate(
                             abortPipeline: true
                         )
-
-                        echo "SonarQube Quality Gate: ${qualityGate.status}"
+                        echo "Quality Gate: ${qualityGate.status}"
                     }
                 }
             }
@@ -65,7 +62,70 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 sh '''
-                    docker build -t "$DOCKER_IMAGE" .
+                    docker build -t "$DOCKER_IMAGE:$BUILD_NUMBER" .
+                    docker tag "$DOCKER_IMAGE:$BUILD_NUMBER" "$DOCKER_IMAGE:latest"
+                '''
+            }
+        }
+
+        stage('Push to Docker Hub') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-creds',
+                        usernameVariable: 'DOCKERHUB_USER',
+                        passwordVariable: 'DOCKERHUB_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        set +x
+                        echo "$DOCKERHUB_TOKEN" | docker login \
+                            --username "$DOCKERHUB_USER" --password-stdin
+
+                        docker push "$DOCKER_IMAGE:$BUILD_NUMBER"
+                        docker push "$DOCKER_IMAGE:latest"
+
+                        docker logout
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy to EC2') {
+            steps {
+                sh '''
+                    docker pull "$DOCKER_IMAGE:latest"
+
+                    docker rm -f "$APP_CONTAINER" || true
+
+                    docker run -d \
+                        --name "$APP_CONTAINER" \
+                        --restart unless-stopped \
+                        -p "$APP_PORT:$APP_INTERNAL_PORT" \
+                        "$DOCKER_IMAGE:latest"
+                '''
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                sh '''
+                    ATTEMPTS=12
+
+                    for i in $(seq 1 "$ATTEMPTS"); do
+                        if curl -fsS \
+                            "http://localhost:$APP_PORT/health"; then
+                            echo "Application health check passed."
+                            exit 0
+                        fi
+
+                        echo "Waiting for application... ($i/$ATTEMPTS)"
+                        sleep 5
+                    done
+
+                    echo "Health check failed."
+                    docker logs "$APP_CONTAINER" || true
+                    exit 1
                 '''
             }
         }
@@ -73,7 +133,7 @@ pipeline {
 
     post {
         success {
-            echo 'CI/CD pipeline completed successfully!'
+            echo 'CI/CD successful: tests, quality gate, Docker Hub push and deployment completed.'
         }
 
         failure {
@@ -81,8 +141,7 @@ pipeline {
         }
 
         always {
-            echo 'CI/CD pipeline execution completed.'
+            echo 'Pipeline execution completed.'
         }
     }
 }
-

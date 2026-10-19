@@ -2,6 +2,13 @@
 pipeline {
     agent any
 
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)
+        timeout(time: 30, unit: 'MINUTES')
+    }
+
     environment {
         DOCKER_IMAGE = 'ranjithkumarrk27/project-2-cicd'
         APP_CONTAINER = 'project-2-app'
@@ -13,21 +20,23 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                echo 'Source code checked out by Jenkins SCM'
+                checkout scm
+                echo 'Source code checked out successfully.'
             }
         }
 
         stage('Verify Environment') {
             steps {
                 sh '''
-                    set -e
-                    echo "Node.js:"
+                    set -eu
+
+                    echo "Node.js version:"
                     node --version
 
-                    echo "NPM:"
+                    echo "NPM version:"
                     npm --version
 
-                    echo "Docker:"
+                    echo "Docker version:"
                     docker --version
                 '''
             }
@@ -36,7 +45,7 @@ pipeline {
         stage('Install and Test') {
             steps {
                 sh '''
-                    set -e
+                    set -eu
                     npm install
                     npm test
                 '''
@@ -47,7 +56,8 @@ pipeline {
             steps {
                 withSonarQubeEnv('SonarQube') {
                     sh '''
-                        set -e
+                        set -eu
+
                         /var/jenkins_home/tools/hudson.plugins.sonar.SonarRunnerInstallation/SonarScanner/bin/sonar-scanner
                     '''
                 }
@@ -62,7 +72,7 @@ pipeline {
                             abortPipeline: true
                         )
 
-                        echo "Quality Gate: ${qualityGate.status}"
+                        echo "SonarQube Quality Gate: ${qualityGate.status}"
                     }
                 }
             }
@@ -71,14 +81,11 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 sh '''
-                    set -e
+                    set -eu
 
                     docker build \
-                        -t "$DOCKER_IMAGE:$BUILD_NUMBER" .
-
-                    docker tag \
-                        "$DOCKER_IMAGE:$BUILD_NUMBER" \
-                        "$DOCKER_IMAGE:latest"
+                        -t "$DOCKER_IMAGE:$BUILD_NUMBER" \
+                        -t "$DOCKER_IMAGE:latest" .
                 '''
             }
         }
@@ -93,7 +100,7 @@ pipeline {
                     )
                 ]) {
                     sh '''
-                        set -e
+                        set -eu
                         set +x
 
                         echo "$DOCKERHUB_TOKEN" | docker login \
@@ -112,7 +119,7 @@ pipeline {
         stage('Deploy to EC2') {
             steps {
                 sh '''
-                    set -e
+                    set -eu
 
                     docker pull "$DOCKER_IMAGE:latest"
 
@@ -124,7 +131,7 @@ pipeline {
                         -p "$APP_PORT:$APP_INTERNAL_PORT" \
                         "$DOCKER_IMAGE:latest"
 
-                    echo "Deployment container started."
+                    echo "Application container started."
                 '''
             }
         }
@@ -132,7 +139,7 @@ pipeline {
         stage('Health Check') {
             steps {
                 sh '''
-                    set -e
+                    set -eu
 
                     ATTEMPTS=12
 
@@ -163,15 +170,64 @@ pipeline {
 
     post {
         success {
-            echo 'SUCCESS: CI, tests, SonarQube, Docker Hub push and deployment completed!'
+            echo 'SUCCESS: CI/CD pipeline completed successfully.'
+
+            emailext(
+                to: 'YOUR_EMAIL@gmail.com',
+                subject: "SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: """
+Hello,
+
+Your CI/CD pipeline completed successfully.
+
+Job: ${env.JOB_NAME}
+Build Number: ${env.BUILD_NUMBER}
+Status: ${currentBuild.currentResult}
+
+Completed stages:
+- Node.js tests
+- SonarQube analysis and Quality Gate
+- Docker image build and Docker Hub push
+- EC2 deployment
+- Application health check
+
+Console Output:
+${env.BUILD_URL}console
+
+Regards,
+Jenkins CI/CD
+"""
+            )
         }
 
         failure {
-            echo 'FAILED: Check Console Output for the failing stage.'
+            echo 'FAILED: Please check the Jenkins Console Output.'
+
+            emailext(
+                to: 'YOUR_EMAIL@gmail.com',
+                subject: "FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: """
+Hello,
+
+Your CI/CD pipeline failed.
+
+Job: ${env.JOB_NAME}
+Build Number: ${env.BUILD_NUMBER}
+Status: ${currentBuild.currentResult}
+
+Please check the Console Output to identify the failing stage.
+
+Console Output:
+${env.BUILD_URL}console
+
+Regards,
+Jenkins CI/CD
+"""
+            )
         }
 
         always {
-            echo 'CI/CD pipeline execution completed.'
+            echo "Pipeline finished with status: ${currentBuild.currentResult}"
         }
     }
 }

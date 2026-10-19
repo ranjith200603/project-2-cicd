@@ -20,8 +20,14 @@ pipeline {
         stage('Verify Environment') {
             steps {
                 sh '''
+                    set -e
+                    echo "Node.js:"
                     node --version
+
+                    echo "NPM:"
                     npm --version
+
+                    echo "Docker:"
                     docker --version
                 '''
             }
@@ -30,6 +36,7 @@ pipeline {
         stage('Install and Test') {
             steps {
                 sh '''
+                    set -e
                     npm install
                     npm test
                 '''
@@ -40,6 +47,7 @@ pipeline {
             steps {
                 withSonarQubeEnv('SonarQube') {
                     sh '''
+                        set -e
                         /var/jenkins_home/tools/hudson.plugins.sonar.SonarRunnerInstallation/SonarScanner/bin/sonar-scanner
                     '''
                 }
@@ -53,6 +61,7 @@ pipeline {
                         def qualityGate = waitForQualityGate(
                             abortPipeline: true
                         )
+
                         echo "Quality Gate: ${qualityGate.status}"
                     }
                 }
@@ -62,8 +71,14 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 sh '''
-                    docker build -t "$DOCKER_IMAGE:$BUILD_NUMBER" .
-                    docker tag "$DOCKER_IMAGE:$BUILD_NUMBER" "$DOCKER_IMAGE:latest"
+                    set -e
+
+                    docker build \
+                        -t "$DOCKER_IMAGE:$BUILD_NUMBER" .
+
+                    docker tag \
+                        "$DOCKER_IMAGE:$BUILD_NUMBER" \
+                        "$DOCKER_IMAGE:latest"
                 '''
             }
         }
@@ -78,9 +93,12 @@ pipeline {
                     )
                 ]) {
                     sh '''
+                        set -e
                         set +x
+
                         echo "$DOCKERHUB_TOKEN" | docker login \
-                            --username "$DOCKERHUB_USER" --password-stdin
+                            --username "$DOCKERHUB_USER" \
+                            --password-stdin
 
                         docker push "$DOCKER_IMAGE:$BUILD_NUMBER"
                         docker push "$DOCKER_IMAGE:latest"
@@ -94,6 +112,8 @@ pipeline {
         stage('Deploy to EC2') {
             steps {
                 sh '''
+                    set -e
+
                     docker pull "$DOCKER_IMAGE:latest"
 
                     docker rm -f "$APP_CONTAINER" || true
@@ -103,6 +123,8 @@ pipeline {
                         --restart unless-stopped \
                         -p "$APP_PORT:$APP_INTERNAL_PORT" \
                         "$DOCKER_IMAGE:latest"
+
+                    echo "Deployment container started."
                 '''
             }
         }
@@ -110,11 +132,19 @@ pipeline {
         stage('Health Check') {
             steps {
                 sh '''
+                    set -e
+
                     ATTEMPTS=12
 
                     for i in $(seq 1 "$ATTEMPTS"); do
-                        if curl -fsS \
-                            "http://localhost:$APP_PORT/health"; then
+                        if docker exec "$APP_CONTAINER" node -e "
+                            fetch('http://127.0.0.1:3000/health')
+                              .then(async r => {
+                                console.log(await r.text());
+                                process.exit(r.ok ? 0 : 1);
+                              })
+                              .catch(() => process.exit(1));
+                        "; then
                             echo "Application health check passed."
                             exit 0
                         fi
@@ -133,15 +163,15 @@ pipeline {
 
     post {
         success {
-            echo 'CI/CD successful: tests, quality gate, Docker Hub push and deployment completed.'
+            echo 'SUCCESS: CI, tests, SonarQube, Docker Hub push and deployment completed!'
         }
 
         failure {
-            echo 'Pipeline failed. Check Console Output.'
+            echo 'FAILED: Check Console Output for the failing stage.'
         }
 
         always {
-            echo 'Pipeline execution completed.'
+            echo 'CI/CD pipeline execution completed.'
         }
     }
 }
